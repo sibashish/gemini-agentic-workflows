@@ -39,6 +39,11 @@ DEFAULT_FALLBACK_MODELS = [
     "gemini-3.1-flash-lite",
 ]
 
+DEFAULT_EMBEDDING_MODELS = [
+    "gemini-embedding-001",
+    "text-embedding-004",
+]
+
 DEFAULT_SYSTEM_ROLE = "You are a concise, accurate technical and analytical AI assistant."
 
 T = TypeVar("T", bound=BaseModel)
@@ -127,4 +132,49 @@ def print_gemini(
         model=model,
     )
     print(result)
+
+# The following is for converting text to vector
+def text_to_vector(
+    text: str,
+    dimensions: int = 768,
+    task_type: str = "SEMANTIC_SIMILARITY",
+    model: str | None = None,
+) -> list[float]:
+    """Converts text into a numerical vector embedding with timeout and model fallback."""
+    if not text or not text.strip():
+        raise ValueError("Input text for vectorization cannot be empty.")
+
+    models_to_try = [model] if model else DEFAULT_EMBEDDING_MODELS
+
+    for idx, current_model in enumerate(models_to_try):
+        start_time = time.perf_counter()
+        try:
+            response = client.models.embed_content(
+                model=current_model,
+                contents=text,
+                config=types.EmbedContentConfig(
+                    task_type=task_type,
+                    output_dimensionality=dimensions,
+                ),
+            )
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            vector = response.embeddings[0].values
+
+            logger.info(
+                f"embed_model={current_model} | dims={len(vector)} | latency={elapsed_ms:.0f}ms"
+            )
+            return vector
+
+        except Exception as e:
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            if idx == len(models_to_try) - 1:
+                logger.error(f"All embedding models failed. Last error on {current_model}: {e}")
+                raise
+
+            next_model = models_to_try[idx + 1]
+            logger.warning(
+                f"embed_model={current_model} failed after {elapsed_ms:.0f}ms "
+                f"({type(e).__name__}). Falling back to {next_model}..."
+            )
+            time.sleep(1)
 
